@@ -102,29 +102,28 @@ function seenBefore(id) {
   return false;
 }
 
-// --- Helper đọc FID từ mọi kiểu payload ---
-function extractFids(evt) {
-  const d = evt?.data || evt?.event || evt || {};
-  const actor =
-    d.actor_fid ??
-    d.user_fid ??
-    d.follower_fid ??
-    d.from_fid ??
-    d.fid ??
-    d.actor?.fid ??
-    d.user?.fid;
+// --- Helper: rút thông tin follow/unfollow từ payload Neynar ---
+function extractFollow(evt) {
+  const d = evt?.data || {};
+  const actor_fid = Number(
+    d.actor_fid ?? d.user?.fid ?? d.user_fid ?? d.follower_fid ?? d.from_fid
+  );
+  const target_fid = Number(
+    d.target_fid ?? d.target_user?.fid ?? d.followed_fid ?? d.to_fid
+  );
 
-  const target =
-    d.target_fid ??
-    d.followed_fid ??
-    d.to_fid ??
-    d.target?.fid ??
-    d.target_user_fid;
+  const actor_username =
+    d.user?.username ?? d.actor?.username ?? d.user_username ?? undefined;
+  const target_username =
+    d.target_user?.username ?? d.target?.username ?? d.target_username ?? undefined;
 
-  return {
-    actor_fid: actor ? Number(actor) : undefined,
-    target_fid: target ? Number(target) : undefined,
-  };
+  const ts =
+    d.timestamp ??
+    d.event_timestamp ??
+    evt.created_at ??
+    Date.now();
+
+  return { actor_fid, target_fid, actor_username, target_username, ts };
 }
 
 // --- Main webhook handler ---
@@ -138,7 +137,8 @@ app.post(WEBHOOK_PATH, async (req, res) => {
     if (seenBefore(evt.id)) return res.send("ok");
 
     if (evt?.type === "follow.created" || evt?.type === "follow.deleted") {
-      const { actor_fid, target_fid } = extractFids(evt);
+      const { actor_fid, target_fid, actor_username, target_username, ts } =
+        extractFollow(evt);
 
       if (!actor_fid || !target_fid) {
         await sendTG(
@@ -149,31 +149,22 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         return res.send("ok");
       }
 
-      const map = await fetchUsersByFids([actor_fid, target_fid]);
-      const actor = map[actor_fid] || {};
-      const target = map[target_fid] || {};
+      // fallback: nếu thiếu username thì fetch
+      let aUser = actor_username;
+      let tUser = target_username;
+      if (!aUser || !tUser) {
+        const map = await fetchUsersByFids([actor_fid, target_fid]);
+        aUser = aUser ?? map[actor_fid]?.username ?? String(actor_fid);
+        tUser = tUser ?? map[target_fid]?.username ?? String(target_fid);
+      }
 
-      const action =
-        evt.type === "follow.created" ? "FOLLOW" : "UNFOLLOW";
-      const msg = [
-        `🔔 <b>${action}</b>`,
-        `👤 <b>${actor.display_name || actor.username || actor_fid}</b> (@${
-          actor.username || "?"
-        })`,
-        `${
-          action === "FOLLOW" ? "➡️" : "↩️"
-        } <b>${target.display_name || target.username || target_fid}</b> (@${
-          target.username || "?"
-        })`,
-        `FID: ${actor_fid} → ${target_fid}`,
-        evt.timestamp
-          ? `⏱ ${new Date(evt.timestamp).toISOString()}`
-          : null,
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      await sendTG(msg);
+      const verb = evt.type === "follow.created" ? "followed" : "unfollowed";
+      const lines = [
+        `${aUser} ${verb} ${tUser}`,
+        `https://farcaster.xyz/${tUser}`,
+        new Date(ts).toISOString(),
+      ];
+      await sendTG(lines.join("\n"));
     }
 
     res.send("ok");
