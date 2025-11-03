@@ -31,6 +31,8 @@ const TRACK_FIDS = String(process.env.TRACK_FIDS || "3")
   .map((s) => Number(s.trim()))
   .filter((n) => Number.isFinite(n));
 
+console.log("TRACK_FIDS parsed =", TRACK_FIDS);
+
 // Cache nhẹ map FID -> username để enrich tin nhắn
 const userCache = new Map(); // fid -> { username, display_name, ts }
 const CACHE_TTL_MS = 10 * 60 * 1000;
