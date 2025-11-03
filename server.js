@@ -26,12 +26,12 @@ async function sendTG(text) {
 // --- Neynar helpers ---
 const NEYNAR_SECRET = process.env.NEYNAR_WEBHOOK_SECRET || ""; // optional for now
 const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY || "";
-const TRACK_FIDS = String(process.env.TRACK_FIDS || "3")
-  .split(",")
-  .map((s) => Number(s.trim()))
-  .filter((n) => Number.isFinite(n));
+// const TRACK_FIDS = String(process.env.TRACK_FIDS || "3")
+//   .split(",")
+//   .map((s) => Number(s.trim()))
+//   .filter((n) => Number.isFinite(n));
 
-console.log("TRACK_FIDS parsed =", TRACK_FIDS);
+// console.log("TRACK_FIDS parsed =", TRACK_FIDS);
 
 // Cache nhẹ map FID -> username để enrich tin nhắn
 const userCache = new Map(); // fid -> { username, display_name, ts }
@@ -100,7 +100,7 @@ app.post(WEBHOOK_PATH, async (req, res) => {
     if (evt?.type === "follow.created" || evt?.type === "follow.deleted") {
       const { actor_fid, target_fid } = evt.data || {};
       // Chỉ quan tâm outbound của các FID mình theo dõi
-      if (!TRACK_FIDS.includes(Number(actor_fid))) return res.send("ok");
+      // if (!TRACK_FIDS.includes(Number(actor_fid))) return res.send("ok");
 
       const map = await fetchUsersByFids([actor_fid, target_fid]);
       const actor = map[actor_fid] || {};
