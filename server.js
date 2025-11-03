@@ -37,7 +37,7 @@ const NEYNAR_SECRET = process.env.NEYNAR_WEBHOOK_SECRET || "";
 const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY;
 
 // Cache nhẹ map FID -> username/display_name
-const userCache = new Map(); // fid -> { username, display_name, ts }
+const userCache = new Map();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 async function fetchUsersByFids(fids = []) {
   if (!fids.length) return {};
@@ -83,13 +83,13 @@ app.use(WEBHOOK_PATH, express.raw({ type: "application/json" }));
 
 function verifySignature(req) {
   const signature = req.header("X-Neynar-Signature");
-  if (!signature || !NEYNAR_SECRET) return true; // bỏ qua nếu chưa có secret
-  const payload = req.body; // Buffer
+  if (!signature || !NEYNAR_SECRET) return true;
+  const payload = req.body;
   const h = crypto.createHmac("sha512", NEYNAR_SECRET).update(payload).digest("hex");
   return h === signature;
 }
 
-// idempotency chống trùng (nếu Neynar retry)
+// idempotency chống trùng
 const seen = new Set();
 function seenBefore(id) {
   if (!id) return false;
@@ -126,6 +126,19 @@ function extractFollow(evt) {
   return { actor_fid, target_fid, actor_username, target_username, ts };
 }
 
+// --- Helper: format ngày + giờ UTC+7 ---
+function formatDateTimeUTC7(ts) {
+  const t = typeof ts === "number" ? ts : Date.parse(ts);
+  const d = new Date(t);
+  const offsetMs = 7 * 60 * 60 * 1000;
+  const local = new Date(d.getTime() + offsetMs);
+  const day = String(local.getUTCDate()).padStart(2, "0");
+  const month = String(local.getUTCMonth() + 1).padStart(2, "0");
+  const hours = String(local.getUTCHours()).padStart(2, "0");
+  const minutes = String(local.getUTCMinutes()).padStart(2, "0");
+  return `${day}/${month} ${hours}:${minutes}`;
+}
+
 // --- Main webhook handler ---
 app.post(WEBHOOK_PATH, async (req, res) => {
   try {
@@ -133,7 +146,6 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       return res.status(401).send("invalid signature");
 
     const evt = JSON.parse(req.body.toString("utf8"));
-
     if (seenBefore(evt.id)) return res.send("ok");
 
     if (evt?.type === "follow.created" || evt?.type === "follow.deleted") {
@@ -149,7 +161,6 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         return res.send("ok");
       }
 
-      // fallback: nếu thiếu username thì fetch
       let aUser = actor_username;
       let tUser = target_username;
       if (!aUser || !tUser) {
@@ -158,11 +169,14 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         tUser = tUser ?? map[target_fid]?.username ?? String(target_fid);
       }
 
-      const verb = evt.type === "follow.created" ? "followed" : "unfollowed";
+      const verbUpper = evt.type === "follow.created" ? "FOLLOWED" : "UNFOLLOWED";
+      const aLink = `<a href="https://farcaster.xyz/${aUser}">${aUser}</a>`;
+      const tLink = `<a href="https://farcaster.xyz/${tUser}">${tUser}</a>`;
+      const timeStr = formatDateTimeUTC7(ts);
+
       const lines = [
-        `${aUser} ${verb} ${tUser}`,
-        `https://farcaster.xyz/${tUser}`,
-        new Date(ts).toISOString(),
+        `${aLink} <b>${verbUpper}</b> ${tLink}`,
+        timeStr,
       ];
       await sendTG(lines.join("\n"));
     }
