@@ -41,6 +41,8 @@ const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY;
 
 // Cache nhẹ map FID -> username/display_name
 const userCache = new Map();
+// Keep last seen full profile snapshot for diff (in-memory)
+const lastProfile = new Map(); // fid -> { username, display_name, bio, pfp_url, location, website }
 const CACHE_TTL_MS = 10 * 60 * 1000;
 async function fetchUsersByFids(fids = []) {
   if (!fids.length) return {};
@@ -62,6 +64,10 @@ async function fetchUsersByFids(fids = []) {
           userCache.set(Number(u.fid), {
             username: u.username,
             display_name: u.display_name,
+            bio: u.bio || u.profile?.bio || u.about_me,
+            pfp_url: u.pfp_url || u.pfp?.url,
+            location: u.location || u.profile?.location,
+            website: u.website || u.profile?.url || u.profile?.website,
             ts: now,
           });
       } else {
@@ -231,7 +237,8 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       const uLink = `<a href="https://farcaster.xyz/${u}">${u}</a>`;
       const timeStr = formatDateTimeUTC7(ts);
 
-      // Build human-readable change lines
+      // Build human-readable change lines using before/after when available,
+      // otherwise use lastProfile + current fetched data
       const changeLines = [];
       const addChange = (k, oldV, newV) => {
         if (oldV === newV) return;
@@ -241,38 +248,61 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         changeLines.push(`${key}: ${beforeStr} → ${afterStr}`);
       };
 
-      // 1) explicit diff objects
-      if (changesObj && typeof changesObj === "object" && Object.keys(changesObj).length) {
-        for (const [k, v] of Object.entries(changesObj)) {
-          if (v && typeof v === "object" && ("old" in v || "new" in v)) {
-            addChange(k, v.old, v.new);
-          } else if (Array.isArray(v) && v.length === 2) {
-            addChange(k, v[0], v[1]);
-          }
-        }
+      // Prefer explicit before/after from payload
+      let oldObj = before && Object.keys(before).length ? before : null;
+      let newObj = after && Object.keys(after).length ? after : null;
+
+      // If payload doesn't include before, try lastProfile
+      if (!oldObj && fid) oldObj = lastProfile.get(fid) || null;
+
+      // If payload doesn't include after, fetch now OR use cache
+      if (!newObj) {
+        const map = await fetchUsersByFids([fid]);
+        newObj = {
+          username: map[fid]?.username,
+          display_name: map[fid]?.display_name,
+          bio: map[fid]?.bio,
+          pfp_url: map[fid]?.pfp_url,
+          location: map[fid]?.location,
+          website: map[fid]?.website,
+        };
       }
 
-      // 2) before/after objects (compare known profile fields)
+      // Fields to show
       const keysToCheck = ["username", "display_name", "bio", "pfp_url", "location", "website"];
-      if (Object.keys(before).length || Object.keys(after).length) {
+
+      // If we have either old or new, compute diffs
+      if (oldObj || newObj) {
         for (const key of keysToCheck) {
-          const ov = before?.[key];
-          const nv = after?.[key];
+          const ov = oldObj?.[key];
+          const nv = newObj?.[key];
           if (ov !== undefined || nv !== undefined) addChange(key, ov, nv);
         }
       }
 
-      // 3) if only list of updated fields, show current values
+      // If still empty and we only got a list of updated fields, show current values
       if (changeLines.length === 0 && Array.isArray(updatedFields) && updatedFields.length) {
         for (const k of updatedFields) {
           const key = String(k);
-          const v = after?.[key];
+          const v = newObj?.[key];
           const val = v != null ? safeText(v, 160) : "(empty)";
           changeLines.push(`${key.toUpperCase()}: ${val}`);
         }
       }
 
-      // if still empty, show a generic hint
+      // Update lastProfile snapshot for next time
+      if (fid && newObj) {
+        lastProfile.set(fid, {
+          username: newObj.username,
+          display_name: newObj.display_name,
+          bio: newObj.bio,
+          pfp_url: newObj.pfp_url,
+          location: newObj.location,
+          website: newObj.website,
+        });
+      }
+
+      // If still empty, show a generic hint
       if (changeLines.length === 0) {
         changeLines.push("(profile fields updated)");
       }
