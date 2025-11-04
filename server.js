@@ -148,10 +148,14 @@ function extractUserUpdated(evt) {
   const fid = Number(d.user?.fid ?? d.fid ?? d.actor_fid ?? d.user_fid);
   const username = d.user?.username;
   const ts = d.timestamp ?? d.event_timestamp ?? evt.created_at ?? Date.now();
-  // Various possible shapes from Neynar: `changes`, `diff`, or `updated_fields`
+
+  // Possible shapes from Neynar
   const changesObj = d.changes || d.diff || d.updated || {};
-  const updatedFields = d.updated_fields || d.fields || null; // could be array of keys
-  return { fid, username, ts, changesObj, updatedFields, userNow: d.user };
+  const updatedFields = d.updated_fields || d.fields || null; // array of keys
+  const before = d.previous_user || d.before || d.old_user || d.old || {};
+  const after = d.user || d.after || d.new_user || d.new || {};
+
+  return { fid, username, ts, changesObj, updatedFields, before, after };
 }
 
 // --- Helper: rút thông tin cast.created ---
@@ -161,10 +165,13 @@ function extractCastCreated(evt) {
   const fid = Number(c.author?.fid ?? c.user?.fid ?? c.fid ?? d.user?.fid);
   const username = c.author?.username ?? d.user?.username;
   const text = c.text ?? c.content ?? d.text;
-  // try to find a permalink id/hash for the cast
+  // permalink id/hash for the cast
   const castHash = c.hash ?? c.merkle_root ?? c.cast_hash ?? c.id ?? c.hash_hex;
+  // detect root: no parent identifiers
+  const parentHash = c.parent_hash ?? c.parentHash ?? c.parent?.hash ?? c.parent_merkle_root ?? c.parent_url ?? c.parentUri;
+  const isRoot = !parentHash; // true if no parent
   const ts = d.timestamp ?? d.event_timestamp ?? evt.created_at ?? Date.now();
-  return { fid, username, text, castHash, ts };
+  return { fid, username, text, castHash, isRoot, ts };
 }
 
 function safeText(s, max = 400) {
@@ -215,7 +222,7 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       await sendTG(lines.join("\n"), TG_CHAT_ID_FOLLOW);
     }
     else if (evt?.type === "user.updated") {
-      const { fid, username, ts, changesObj, updatedFields, userNow } = extractUserUpdated(evt);
+      const { fid, username, ts, changesObj, updatedFields, before, after } = extractUserUpdated(evt);
       let u = username;
       if (!u && fid) {
         const map = await fetchUsersByFids([fid]);
@@ -227,12 +234,14 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       // Build human-readable change lines
       const changeLines = [];
       const addChange = (k, oldV, newV) => {
+        if (oldV === newV) return;
         const key = k.replace(/_/g, " ").toUpperCase();
-        const before = oldV != null && String(oldV).length ? safeText(oldV, 160) : "(empty)";
-        const after = newV != null && String(newV).length ? safeText(newV, 160) : "(empty)";
-        changeLines.push(`${key}: ${before} → ${after}`);
+        const beforeStr = oldV != null && String(oldV).length ? safeText(oldV, 160) : "(empty)";
+        const afterStr  = newV != null && String(newV).length ? safeText(newV, 160) : "(empty)";
+        changeLines.push(`${key}: ${beforeStr} → ${afterStr}`);
       };
 
+      // 1) explicit diff objects
       if (changesObj && typeof changesObj === "object" && Object.keys(changesObj).length) {
         for (const [k, v] of Object.entries(changesObj)) {
           if (v && typeof v === "object" && ("old" in v || "new" in v)) {
@@ -241,19 +250,31 @@ app.post(WEBHOOK_PATH, async (req, res) => {
             addChange(k, v[0], v[1]);
           }
         }
-      } else if (Array.isArray(updatedFields) && updatedFields.length) {
-        // If only a field list is provided, show current values for common keys
+      }
+
+      // 2) before/after objects (compare known profile fields)
+      const keysToCheck = ["username", "display_name", "bio", "pfp_url", "location", "website"];
+      if (Object.keys(before).length || Object.keys(after).length) {
+        for (const key of keysToCheck) {
+          const ov = before?.[key];
+          const nv = after?.[key];
+          if (ov !== undefined || nv !== undefined) addChange(key, ov, nv);
+        }
+      }
+
+      // 3) if only list of updated fields, show current values
+      if (changeLines.length === 0 && Array.isArray(updatedFields) && updatedFields.length) {
         for (const k of updatedFields) {
           const key = String(k);
-          if (!userNow) { changeLines.push(key.toUpperCase()); continue; }
-          const current =
-            key === "bio" ? userNow.bio :
-            key === "display_name" || key === "displayName" ? userNow.display_name :
-            key === "pfp" || key === "pfp_url" ? userNow.pfp_url :
-            key === "username" ? userNow.username :
-            userNow[key];
-          changeLines.push(`${key.toUpperCase()}: ${safeText(current, 160)}`);
+          const v = after?.[key];
+          const val = v != null ? safeText(v, 160) : "(empty)";
+          changeLines.push(`${key.toUpperCase()}: ${val}`);
         }
+      }
+
+      // if still empty, show a generic hint
+      if (changeLines.length === 0) {
+        changeLines.push("(profile fields updated)");
       }
 
       const lines = [
@@ -264,7 +285,8 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       await sendTG(lines.join("\n"), TG_CHAT_ID_ACTIVITY);
     }
     else if (evt?.type === "cast.created") {
-      const { fid, username, text, castHash, ts } = extractCastCreated(evt);
+      const { fid, username, text, castHash, isRoot, ts } = extractCastCreated(evt);
+      if (!isRoot) { return res.send("ok"); }
       let u = username;
       if (!u && fid) {
         const map = await fetchUsersByFids([fid]);
