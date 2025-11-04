@@ -173,9 +173,10 @@ function extractCastCreated(evt) {
   const text = c.text ?? c.content ?? d.text;
   // permalink id/hash for the cast
   const castHash = c.hash ?? c.merkle_root ?? c.cast_hash ?? c.id ?? c.hash_hex;
-  // detect root: no parent identifiers
-  const parentHash = c.parent_hash ?? c.parentHash ?? c.parent?.hash ?? c.parent_merkle_root ?? c.parent_url ?? c.parentUri;
-  const isRoot = !parentHash; // true if no parent
+  // detect root: consider only *cast-hash* style parents; channel parent URLs should still be treated as root
+  const parentCastHash = c.parent_hash ?? c.parentHash ?? c.parent?.hash ?? c.parent_merkle_root ?? c.replyParentMerkleRoot ?? c.rootParentHash;
+  const channelParentUrl = c.parent_url ?? c.parentUri ?? c.channel?.url; // informational, does not affect isRoot
+  const isRoot = !parentCastHash; // replies/quotes have a parent cast hash; channel posts usually don't
   const ts = d.timestamp ?? d.event_timestamp ?? evt.created_at ?? Date.now();
   return { fid, username, text, castHash, isRoot, ts };
 }
