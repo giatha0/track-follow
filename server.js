@@ -10,12 +10,15 @@ const WEBHOOK_PATH = "/webhooks/neynar";
 
 // --- Telegram helper ---
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TG_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-async function sendTG(text) {
-  if (!TG_TOKEN || !TG_CHAT_ID) return;
+// Backward compatible: default follow/unfollow channel = TELEGRAM_CHAT_ID
+const TG_CHAT_ID_FOLLOW = process.env.TELEGRAM_CHAT_ID;
+// Separate channel for other activities (user.updated, cast.created)
+const TG_CHAT_ID_ACTIVITY = process.env.TELEGRAM_CHAT_ID_ACTIVITY || TG_CHAT_ID_FOLLOW;
+async function sendTG(text, chatId = TG_CHAT_ID_FOLLOW) {
+  if (!TG_TOKEN || !chatId) return;
   const url = `https://api.telegram.org/bot${TG_TOKEN}/sendMessage`;
   const body = {
-    chat_id: TG_CHAT_ID,
+    chat_id: chatId,
     text,
     parse_mode: "HTML",
     disable_web_page_preview: true,
@@ -139,6 +142,32 @@ function formatDateTimeUTC7(ts) {
   return `${day}/${month} ${hours}:${minutes}`;
 }
 
+// --- Helper: rút thông tin user.updated ---
+function extractUserUpdated(evt) {
+  const d = evt?.data || {};
+  const fid = Number(d.user?.fid ?? d.fid ?? d.actor_fid ?? d.user_fid);
+  const username = d.user?.username;
+  const ts = d.timestamp ?? d.event_timestamp ?? evt.created_at ?? Date.now();
+  return { fid, username, ts };
+}
+
+// --- Helper: rút thông tin cast.created ---
+function extractCastCreated(evt) {
+  const d = evt?.data || {};
+  const c = d.cast || d.message || d;
+  const fid = Number(c.author?.fid ?? c.user?.fid ?? c.fid ?? d.user?.fid);
+  const username = c.author?.username ?? d.user?.username;
+  const text = c.text ?? c.content ?? d.text;
+  const ts = d.timestamp ?? d.event_timestamp ?? evt.created_at ?? Date.now();
+  return { fid, username, text, ts };
+}
+
+function safeText(s, max = 400) {
+  if (!s) return "";
+  const t = String(s).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return t.length > max ? t.slice(0, max) + "…" : t;
+}
+
 // --- Main webhook handler ---
 app.post(WEBHOOK_PATH, async (req, res) => {
   try {
@@ -178,7 +207,39 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         `${aLink} <b>${verbUpper}</b> ${tLink}`,
         timeStr,
       ];
-      await sendTG(lines.join("\n"));
+      await sendTG(lines.join("\n"), TG_CHAT_ID_FOLLOW);
+    }
+    else if (evt?.type === "user.updated") {
+      const { fid, username, ts } = extractUserUpdated(evt);
+      let u = username;
+      if (!u && fid) {
+        const map = await fetchUsersByFids([fid]);
+        u = map[fid]?.username ?? String(fid);
+      }
+      const uLink = `<a href="https://farcaster.xyz/${u}">${u}</a>`;
+      const timeStr = formatDateTimeUTC7(ts);
+      const lines = [
+        `${uLink} <b>UPDATED PROFILE</b>`,
+        timeStr,
+      ];
+      await sendTG(lines.join("\n"), TG_CHAT_ID_ACTIVITY);
+    }
+    else if (evt?.type === "cast.created") {
+      const { fid, username, text, ts } = extractCastCreated(evt);
+      let u = username;
+      if (!u && fid) {
+        const map = await fetchUsersByFids([fid]);
+        u = map[fid]?.username ?? String(fid);
+      }
+      const uLink = `<a href="https://farcaster.xyz/${u}">${u}</a>`;
+      const timeStr = formatDateTimeUTC7(ts);
+      const preview = safeText(text, 500);
+      const lines = [
+        `${uLink} <b>CASTED</b>`,
+        preview,
+        timeStr,
+      ].filter(Boolean);
+      await sendTG(lines.join("\n"), TG_CHAT_ID_ACTIVITY);
     }
 
     res.send("ok");
