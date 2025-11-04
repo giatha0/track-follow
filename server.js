@@ -148,7 +148,10 @@ function extractUserUpdated(evt) {
   const fid = Number(d.user?.fid ?? d.fid ?? d.actor_fid ?? d.user_fid);
   const username = d.user?.username;
   const ts = d.timestamp ?? d.event_timestamp ?? evt.created_at ?? Date.now();
-  return { fid, username, ts };
+  // Various possible shapes from Neynar: `changes`, `diff`, or `updated_fields`
+  const changesObj = d.changes || d.diff || d.updated || {};
+  const updatedFields = d.updated_fields || d.fields || null; // could be array of keys
+  return { fid, username, ts, changesObj, updatedFields, userNow: d.user };
 }
 
 // --- Helper: rút thông tin cast.created ---
@@ -158,8 +161,10 @@ function extractCastCreated(evt) {
   const fid = Number(c.author?.fid ?? c.user?.fid ?? c.fid ?? d.user?.fid);
   const username = c.author?.username ?? d.user?.username;
   const text = c.text ?? c.content ?? d.text;
+  // try to find a permalink id/hash for the cast
+  const castHash = c.hash ?? c.merkle_root ?? c.cast_hash ?? c.id ?? c.hash_hex;
   const ts = d.timestamp ?? d.event_timestamp ?? evt.created_at ?? Date.now();
-  return { fid, username, text, ts };
+  return { fid, username, text, castHash, ts };
 }
 
 function safeText(s, max = 400) {
@@ -210,7 +215,7 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       await sendTG(lines.join("\n"), TG_CHAT_ID_FOLLOW);
     }
     else if (evt?.type === "user.updated") {
-      const { fid, username, ts } = extractUserUpdated(evt);
+      const { fid, username, ts, changesObj, updatedFields, userNow } = extractUserUpdated(evt);
       let u = username;
       if (!u && fid) {
         const map = await fetchUsersByFids([fid]);
@@ -218,14 +223,48 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       }
       const uLink = `<a href="https://farcaster.xyz/${u}">${u}</a>`;
       const timeStr = formatDateTimeUTC7(ts);
+
+      // Build human-readable change lines
+      const changeLines = [];
+      const addChange = (k, oldV, newV) => {
+        const key = k.replace(/_/g, " ").toUpperCase();
+        const before = oldV != null && String(oldV).length ? safeText(oldV, 160) : "(empty)";
+        const after = newV != null && String(newV).length ? safeText(newV, 160) : "(empty)";
+        changeLines.push(`${key}: ${before} → ${after}`);
+      };
+
+      if (changesObj && typeof changesObj === "object" && Object.keys(changesObj).length) {
+        for (const [k, v] of Object.entries(changesObj)) {
+          if (v && typeof v === "object" && ("old" in v || "new" in v)) {
+            addChange(k, v.old, v.new);
+          } else if (Array.isArray(v) && v.length === 2) {
+            addChange(k, v[0], v[1]);
+          }
+        }
+      } else if (Array.isArray(updatedFields) && updatedFields.length) {
+        // If only a field list is provided, show current values for common keys
+        for (const k of updatedFields) {
+          const key = String(k);
+          if (!userNow) { changeLines.push(key.toUpperCase()); continue; }
+          const current =
+            key === "bio" ? userNow.bio :
+            key === "display_name" || key === "displayName" ? userNow.display_name :
+            key === "pfp" || key === "pfp_url" ? userNow.pfp_url :
+            key === "username" ? userNow.username :
+            userNow[key];
+          changeLines.push(`${key.toUpperCase()}: ${safeText(current, 160)}`);
+        }
+      }
+
       const lines = [
         `${uLink} <b>UPDATED PROFILE</b>`,
+        ...changeLines,
         timeStr,
-      ];
+      ].filter(Boolean);
       await sendTG(lines.join("\n"), TG_CHAT_ID_ACTIVITY);
     }
     else if (evt?.type === "cast.created") {
-      const { fid, username, text, ts } = extractCastCreated(evt);
+      const { fid, username, text, castHash, ts } = extractCastCreated(evt);
       let u = username;
       if (!u && fid) {
         const map = await fetchUsersByFids([fid]);
@@ -234,9 +273,12 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       const uLink = `<a href="https://farcaster.xyz/${u}">${u}</a>`;
       const timeStr = formatDateTimeUTC7(ts);
       const preview = safeText(text, 500);
+      const castId = castHash ? String(castHash) : "";
+      const castLink = castId ? `https://farcaster.xyz/${u}/${castId}` : null;
       const lines = [
         `${uLink} <b>CASTED</b>`,
         preview,
+        castLink,
         timeStr,
       ].filter(Boolean);
       await sendTG(lines.join("\n"), TG_CHAT_ID_ACTIVITY);
