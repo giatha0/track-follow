@@ -183,44 +183,37 @@ function extractCastCreated(evt) {
 }
 
 // --- Helper: rút thông tin trade.created ---
+// --- Helper: rút thông tin trade.created (FIX theo payload thực tế Neynar) ---
 function extractTradeCreated(evt) {
   const d = evt?.data || {};
 
-  const traderFid =
-    Number(d.user?.fid ?? d.trader?.fid ?? d.fid ?? d.user_fid);
+  // trader
+  const traderFid = Number(d.trader?.fid);
+  const username = d.trader?.username;
 
-  const username =
-    d.user?.username ?? d.trader?.username;
+  // transaction
+  const tx = d.transaction || {};
+  const txHash = tx.hash;
+  const chain = tx.network?.name ?? "unknown";
 
-  const amountUsdc =
-    d.amount_usdc ??
-    d.amountUsd ??
-    d.usdc_amount ??
-    d.amount;
+  // net transfer
+  const net = tx.net_transfer || {};
+  const send = net.sending_fungible;
+  const recv = net.receiving_fungible;
 
-  const tokenIn =
-    d.token_in?.symbol ??
-    d.sell_token?.symbol ??
-    d.from_token?.symbol;
+  const tokenIn = send?.token?.symbol;
+  const tokenOut = recv?.token?.symbol;
 
-  const tokenOut =
-    d.token_out?.symbol ??
-    d.buy_token?.symbol ??
-    d.to_token?.symbol;
+  // USDC amount (Neynar cho sẵn in_usd)
+  let amountUsdc = null;
+  if (send?.balance?.in_usd != null) {
+    amountUsdc = Number(send.balance.in_usd);
+  }
 
-  const txHash =
-    d.tx_hash ??
-    d.transaction_hash ??
-    d.hash;
-
-  const chain =
-    d.chain ?? d.network ?? "unknown";
-
-  const ts =
-    d.timestamp ??
-    d.event_timestamp ??
-    evt.created_at ??
-    Date.now();
+  // created_at của Neynar là seconds
+  const ts = evt.created_at
+    ? Number(evt.created_at) * 1000
+    : Date.now();
 
   return {
     traderFid,
