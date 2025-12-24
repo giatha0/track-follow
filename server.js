@@ -390,6 +390,8 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       await sendTG(lines.join("\n"), TG_CHAT_ID_ACTIVITY);
     }
     else if (evt?.type === "trade.created") {
+      // DEBUG: log raw trade.created payload to inspect structure
+      console.log("[trade.created raw]", JSON.stringify(evt, null, 2));
       const {
         traderFid,
         username,
@@ -401,6 +403,16 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         ts,
       } = extractTradeCreated(evt);
 
+      console.log("[trade.created parsed]", {
+        traderFid,
+        username,
+        amountUsdc,
+        tokenIn,
+        tokenOut,
+        txHash,
+        chain,
+        ts,
+      });
       if (!traderFid) return res.send("ok");
 
       let u = username;
