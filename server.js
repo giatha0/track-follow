@@ -203,6 +203,7 @@ function extractTradeCreated(evt) {
 
   const tokenIn = send?.token?.symbol;
   const tokenOut = recv?.token?.symbol;
+  const tokenOutAddress = recv?.token?.address;
 
   // USDC amount (Neynar cho sẵn in_usd)
   let amountUsdc = null;
@@ -221,6 +222,7 @@ function extractTradeCreated(evt) {
     amountUsdc,
     tokenIn,
     tokenOut,
+    tokenOutAddress,
     txHash,
     chain,
     ts,
@@ -391,6 +393,7 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         amountUsdc,
         tokenIn,
         tokenOut,
+        tokenOutAddress,
         txHash,
         chain,
         ts,
@@ -402,6 +405,7 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         amountUsdc,
         tokenIn,
         tokenOut,
+        tokenOutAddress,
         txHash,
         chain,
         ts,
@@ -423,7 +427,9 @@ app.post(WEBHOOK_PATH, async (req, res) => {
 
       const lines = [
         `${uLink} <b>CREATED TRADE</b>`,
-        tokenIn && tokenOut ? `${tokenIn} → ${tokenOut}` : null,
+        tokenIn && tokenOut
+          ? `${tokenIn} → ${tokenOut}${tokenOutAddress ? `\nToken: <code>${tokenOutAddress}</code>` : ""}`
+          : null,
         amountUsdc != null ? `Amount: ${amountUsdc} USDC` : null,
         `Chain: ${chain}`,
         txLink,
