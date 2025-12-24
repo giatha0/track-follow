@@ -14,6 +14,7 @@ const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT_ID_FOLLOW = process.env.TELEGRAM_CHAT_ID;
 // Separate channel for other activities (user.updated, cast.created)
 const TG_CHAT_ID_ACTIVITY = process.env.TELEGRAM_CHAT_ID_ACTIVITY || TG_CHAT_ID_FOLLOW;
+const TG_CHAT_ID_TRADE = process.env.TELEGRAM_CHAT_ID_TRADE;
 async function sendTG(text, chatId = TG_CHAT_ID_FOLLOW) {
   if (!TG_TOKEN || !chatId) return;
   const url = `https://api.telegram.org/bot${TG_TOKEN}/sendMessage`;
@@ -181,6 +182,58 @@ function extractCastCreated(evt) {
   return { fid, username, text, castHash, isRoot, ts };
 }
 
+// --- Helper: rút thông tin trade.created ---
+function extractTradeCreated(evt) {
+  const d = evt?.data || {};
+
+  const traderFid =
+    Number(d.user?.fid ?? d.trader?.fid ?? d.fid ?? d.user_fid);
+
+  const username =
+    d.user?.username ?? d.trader?.username;
+
+  const amountUsdc =
+    d.amount_usdc ??
+    d.amountUsd ??
+    d.usdc_amount ??
+    d.amount;
+
+  const tokenIn =
+    d.token_in?.symbol ??
+    d.sell_token?.symbol ??
+    d.from_token?.symbol;
+
+  const tokenOut =
+    d.token_out?.symbol ??
+    d.buy_token?.symbol ??
+    d.to_token?.symbol;
+
+  const txHash =
+    d.tx_hash ??
+    d.transaction_hash ??
+    d.hash;
+
+  const chain =
+    d.chain ?? d.network ?? "unknown";
+
+  const ts =
+    d.timestamp ??
+    d.event_timestamp ??
+    evt.created_at ??
+    Date.now();
+
+  return {
+    traderFid,
+    username,
+    amountUsdc,
+    tokenIn,
+    tokenOut,
+    txHash,
+    chain,
+    ts,
+  };
+}
+
 function safeText(s, max = 400) {
   if (!s) return "";
   const t = String(s).replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -335,6 +388,44 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         timeStr,
       ].filter(Boolean);
       await sendTG(lines.join("\n"), TG_CHAT_ID_ACTIVITY);
+    }
+    else if (evt?.type === "trade.created") {
+      const {
+        traderFid,
+        username,
+        amountUsdc,
+        tokenIn,
+        tokenOut,
+        txHash,
+        chain,
+        ts,
+      } = extractTradeCreated(evt);
+
+      if (!traderFid) return res.send("ok");
+
+      let u = username;
+      if (!u && traderFid) {
+        const map = await fetchUsersByFids([traderFid]);
+        u = map[traderFid]?.username ?? String(traderFid);
+      }
+
+      const uLink = `<a href="https://farcaster.xyz/${u}">${u}</a>`;
+      const timeStr = formatDateTimeUTC7(ts);
+
+      const txLink = txHash
+        ? `<a href="https://basescan.org/tx/${txHash}">view tx</a>`
+        : null;
+
+      const lines = [
+        `${uLink} <b>CREATED TRADE</b>`,
+        tokenIn && tokenOut ? `${tokenIn} → ${tokenOut}` : null,
+        amountUsdc != null ? `Amount: ${amountUsdc} USDC` : null,
+        `Chain: ${chain}`,
+        txLink,
+        timeStr,
+      ].filter(Boolean);
+
+      await sendTG(lines.join("\n"), TG_CHAT_ID_TRADE);
     }
 
     res.send("ok");
