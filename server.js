@@ -268,13 +268,16 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       const verbUpper = evt.type === "follow.created" ? "FOLLOWED" : "UNFOLLOWED";
       const aLink = `<a href="https://farcaster.xyz/${aUser}">${aUser}</a>`;
       const tLink = `<a href="https://farcaster.xyz/${tUser}">${tUser}</a>`;
+      // Base App profile link + icon
+      const cLink = `🟦 <a href="https://base.app/profile/${tUser}">baseapp/${tUser}</a>`;
       const timeStr = formatDateTimeUTC7(ts);
 
       const lines = [
         `${aLink} <b>${verbUpper}</b> ${tLink}`,
+        cLink,
         timeStr,
       ];
-      await sendTG(lines.join("\n"), TG_CHAT_ID_FOLLOW);
+      await sendTG(lines.join("\n\n"), TG_CHAT_ID_FOLLOW);
     }
     else if (evt?.type === "user.updated") {
       const { fid, username, ts, changesObj, updatedFields, before, after } = extractUserUpdated(evt);
