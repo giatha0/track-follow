@@ -379,7 +379,7 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       const preview = safeText(text, 500);
       const castId = castHash ? String(castHash) : "";
       const castLink = castId ? `https://farcaster.xyz/${u}/${castId}` : null;
-      const baseappLink = castId ? `🟦 <a href="https://base.app/post/${castId}">baseapp<a>` : null;
+      const baseappLink = castId ? `🟦 <a href="https://base.app/post/${castId}">baseapp</a>` : null;
       const lines = [
         `${uLink} <b>CASTED</b>`,
         preview,
