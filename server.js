@@ -379,13 +379,16 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       const preview = safeText(text, 500);
       const castId = castHash ? String(castHash) : "";
       const castLink = castId ? `https://farcaster.xyz/${u}/${castId}` : null;
+      const baseappLink = castId ? `🟦 <a href="https://base.app/post/${castId}">baseapp<a>` : null;
       const lines = [
         `${uLink} <b>CASTED</b>`,
         preview,
         castLink,
+        baseappLink,
         timeStr,
       ].filter(Boolean);
-      await sendTG(lines.join("\n"), TG_CHAT_ID_ACTIVITY);
+      //await sendTG(lines.join("\n"), TG_CHAT_ID_ACTIVITY);
+      await sendTG(lines.join("\n\n"), TG_CHAT_ID_ACTIVITY);
     }
     else if (evt?.type === "trade.created") {
       // DEBUG: log raw trade.created payload to inspect structure
