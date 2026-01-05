@@ -6,7 +6,19 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
 const WEBHOOK_PATH = "/webhooks/neynar";
+
+// --- Special mecode cast routing ---
+const MECODE_USERNAME = process.env.MECODE_USERNAME || "mecode";
+
+// comma-separated keywords
+const MECODE_MATCH_KEYWORDS = (
+  process.env.MECODE_MATCH_KEYWORDS || "Token Engine Test"
+)
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
 
 // --- Telegram helper ---
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -368,18 +380,31 @@ app.post(WEBHOOK_PATH, async (req, res) => {
     }
     else if (evt?.type === "cast.created") {
       const { fid, username, text, castHash, isRoot, ts } = extractCastCreated(evt);
-      if (!isRoot) { return res.send("ok"); }
+      if (!isRoot) return res.send("ok");
+
       let u = username;
       if (!u && fid) {
         const map = await fetchUsersByFids([fid]);
         u = map[fid]?.username ?? String(fid);
       }
+
       const uLink = `<a href="https://farcaster.xyz/${u}">${u}</a>`;
       const timeStr = formatDateTimeUTC7(ts);
       const preview = safeText(text, 500);
       const castId = castHash ? String(castHash) : "";
       const castLink = castId ? `https://farcaster.xyz/${u}/${castId}` : null;
-      const baseappLink = castId ? `🟦 <a href="https://base.app/post/${castId}">baseapp</a>` : null;
+      const baseappLink = castId
+        ? `🟦 <a href="https://base.app/post/${castId}">baseapp</a>`
+        : null;
+
+      // --- special logic for mecode ---
+      const isMecode = u === MECODE_USERNAME;
+      const matchKeyword =
+        isMecode &&
+        MECODE_MATCH_KEYWORDS.some(k =>
+          preview.toLowerCase().includes(k.toLowerCase())
+        );
+
       const lines = [
         `${uLink} <b>CASTED</b>`,
         preview,
@@ -387,9 +412,16 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         baseappLink,
         timeStr,
       ].filter(Boolean);
-      //await sendTG(lines.join("\n"), TG_CHAT_ID_ACTIVITY);
-      await sendTG(lines.join("\n\n"), TG_CHAT_ID_ACTIVITY);
+
+      if (matchKeyword) {
+        // 🚨 special cast → trade channel
+        await sendTG(lines.join("\n\n"), TG_CHAT_ID_TRADE);
+      } else {
+        await sendTG(lines.join("\n\n"), TG_CHAT_ID_ACTIVITY);
+      }
     }
+
+    
     else if (evt?.type === "trade.created") {
       // DEBUG: log raw trade.created payload to inspect structure
       console.log("[trade.created raw]", JSON.stringify(evt, null, 2));
