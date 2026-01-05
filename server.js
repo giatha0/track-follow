@@ -252,6 +252,28 @@ function safeText(s, max = 400) {
   return t.length > max ? t.slice(0, max) + "…" : t;
 }
 
+// --- Helper: parse Ticker / CA from cast text ---
+function parseTokenInfoFromText(text = "") {
+  const out = {
+    ticker: null,
+    ca: null,
+  };
+
+  // match Ticker: $ABC
+  const tickerMatch = text.match(/Ticker\s*:\s*(\$[A-Za-z0-9]+)/i);
+  if (tickerMatch) {
+    out.ticker = tickerMatch[1];
+  }
+
+  // match CA: 0x...
+  const caMatch = text.match(/CA\s*:\s*(0x[a-fA-F0-9]{40})/i);
+  if (caMatch) {
+    out.ca = caMatch[1];
+  }
+
+  return out;
+}
+
 // --- Main webhook handler ---
 app.post(WEBHOOK_PATH, async (req, res) => {
   try {
@@ -396,6 +418,7 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       const uLink = `<a href="https://farcaster.xyz/${u}">${u}</a>`;
       const timeStr = formatDateTimeUTC7(ts);
       const preview = safeText(text, 500);
+      const { ticker, ca } = parseTokenInfoFromText(text);
       const castId = castHash ? String(castHash) : "";
       const castLink = castId ? `https://farcaster.xyz/${u}/${castId}` : null;
       const baseappLink = castId
@@ -413,6 +436,8 @@ app.post(WEBHOOK_PATH, async (req, res) => {
       const lines = [
         `${uLink} <b>CASTED</b>`,
         preview,
+        ticker ? `<b>Ticker:</b> ${ticker}` : null,
+        ca ? `<b>CA:</b> <code>${ca}</code>` : null,
         castLink,
         baseappLink,
         timeStr,
