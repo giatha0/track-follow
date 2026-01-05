@@ -10,11 +10,16 @@ const PORT = process.env.PORT || 3000;
 const WEBHOOK_PATH = "/webhooks/neynar";
 
 // --- Special mecode cast routing ---
-const MECODE_USERNAME = process.env.MECODE_USERNAME || "mecode";
+const MECODE_USERNAMES = (
+  process.env.MECODE_USERNAME //|| "mecode"
+)
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
 
 // comma-separated keywords
 const MECODE_MATCH_KEYWORDS = (
-  process.env.MECODE_MATCH_KEYWORDS || "Token Engine Test"
+  process.env.MECODE_MATCH_KEYWORDS //|| "Token Engine Test"
 )
   .split(",")
   .map(s => s.trim())
@@ -398,7 +403,7 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         : null;
 
       // --- special logic for mecode ---
-      const isMecode = u === MECODE_USERNAME;
+      const isMecode = MECODE_USERNAMES.includes(u);
       const matchKeyword =
         isMecode &&
         MECODE_MATCH_KEYWORDS.some(k =>
