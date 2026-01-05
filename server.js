@@ -418,10 +418,15 @@ app.post(WEBHOOK_PATH, async (req, res) => {
         timeStr,
       ].filter(Boolean);
 
-      if (matchKeyword) {
-        // 🚨 special cast → trade channel
-        await sendTG(lines.join("\n\n"), TG_CHAT_ID_TRADE);
+      if (isMecode) {
+        // user thuộc danh sách đặc biệt
+        if (matchKeyword) {
+          // 🚨 chỉ gửi khi match keyword
+          await sendTG(lines.join("\n\n"), TG_CHAT_ID_TRADE);
+        }
+        // ❌ nếu không match → không gửi gì cả
       } else {
+        // user bình thường
         await sendTG(lines.join("\n\n"), TG_CHAT_ID_ACTIVITY);
       }
     }
